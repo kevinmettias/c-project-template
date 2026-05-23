@@ -1,0 +1,8 @@
+build/
+build-coverage/
+dist/
+*.exe
+*.obj
+*.o
+*.out
+
