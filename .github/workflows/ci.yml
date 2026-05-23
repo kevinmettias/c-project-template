@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build cproj
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Format check
+        run: test -z "$(gofmt -l cmd)"
+
+      - name: Build
+        run: go build ./cmd/cproj
+
+      - name: Smoke generate modular project
+        run: |
+          go run ./cmd/cproj new netstack --kind modular --modules common,dns,tcp,http --out build/smoke
+          test -f build/smoke/netstack/CMakeLists.txt
+          test -f build/smoke/netstack/common/common.h
