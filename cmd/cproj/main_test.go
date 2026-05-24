@@ -165,12 +165,12 @@ func TestProjectFilesModular(t *testing.T) {
 
 	files := ProjectFiles(project)
 	required := []string{
-		"common/common.h",
-		"common/common.c",
-		"dns/dns.h",
-		"dns/dns.c",
-		"tests/test_common.c",
-		"tests/test_dns.c",
+		"common/include/common.h",
+		"common/src/common.c",
+		"common/tests/test_common.c",
+		"dns/include/dns.h",
+		"dns/src/dns.c",
+		"dns/tests/test_dns.c",
 		".github/workflows/ci.yml",
 	}
 

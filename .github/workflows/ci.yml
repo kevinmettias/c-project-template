@@ -35,4 +35,4 @@ jobs:
         run: |
           go run ./cmd/cproj new netstack --kind modular --modules common,dns,tcp,http --out build/smoke
           test -f build/smoke/netstack/CMakeLists.txt
-          test -f build/smoke/netstack/common/common.h
+          test -f build/smoke/netstack/common/include/common.h
