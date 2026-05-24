@@ -425,7 +425,7 @@ const PreCommitTemplate = `repos:
 
       - id: cppcheck
         name: cppcheck
-        entry: cppcheck --enable=warning,style,performance,portability --std=c11 --inline-suppr --quiet
+        entry: cppcheck --enable=warning,style,performance,portability --std=c11 --inline-suppr --quiet .
         language: system
         files: \.(c|h)$
         pass_filenames: false
