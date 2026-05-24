@@ -236,9 +236,9 @@ func ProjectFiles(project Project) map[string]string {
 
 	if project.Kind == "modular" {
 		for _, module := range project.Modules {
-			files[module.Name+"/"+module.Name+".h"] = Render(ModuleHeaderTemplate, module)
-			files[module.Name+"/"+module.Name+".c"] = Render(ModuleSourceTemplate, module)
-			files["tests/test_"+module.Name+".c"] = Render(ModuleTestTemplate, module)
+			files[module.Name+"/include/"+module.Name+".h"] = Render(ModuleHeaderTemplate, module)
+			files[module.Name+"/src/"+module.Name+".c"] = Render(ModuleSourceTemplate, module)
+			files[module.Name+"/tests/test_"+module.Name+".c"] = Render(ModuleTestTemplate, module)
 		}
 	} else {
 		module := project.Modules[0]
@@ -319,13 +319,13 @@ Language: Cpp
 IndentWidth: 4
 TabWidth: 4
 UseTab: Never
-ColumnLimit: 100
+ColumnLimit: 120
 BreakBeforeBraces: Allman
 AllowShortFunctionsOnASingleLine: None
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
 AllowShortBlocksOnASingleLine: Never
-PointerAlignment: Right
+PointerAlignment: Left
 SortIncludes: false
 `
 
@@ -342,7 +342,7 @@ HeaderFilterRegex: '.*'
 FormatStyle: file
 CheckOptions:
   - key: readability-identifier-naming.FunctionIgnoredRegexp
-    value: '^[A-Z][A-Za-z0-9]*(_[A-Z][A-Za-z0-9]*)*$'
+    value: '^([A-Z][A-Za-z0-9]*|[a-z][a-z0-9]*)(_[A-Z][A-Za-z0-9]*)*$'
   - key: readability-identifier-naming.VariableCase
     value: lower_case
   - key: readability-identifier-naming.ParameterCase
@@ -353,6 +353,8 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.EnumCase
     value: CamelCase
+  - key: readability-identifier-naming.EnumConstantCase
+    value: UPPER_CASE
   - key: readability-identifier-naming.MacroDefinitionCase
     value: UPPER_CASE
 `
@@ -456,7 +458,7 @@ endif()
 add_library({{.CMakeName}}_core
 {{- if eq .Kind "modular" }}
 {{- range .Modules }}
-    {{.Name}}/{{.Name}}.c
+    {{.Name}}/src/{{.Name}}.c
 {{- end }}
 {{- else }}
 {{- range .Modules }}
@@ -468,7 +470,7 @@ add_library({{.CMakeName}}_core
 {{- if eq .Kind "modular" }}
 target_include_directories({{.CMakeName}}_core PUBLIC
 {{- range .Modules }}
-    {{.Name}}
+    {{.Name}}/include
 {{- end }}
 )
 {{- else }}
@@ -514,7 +516,11 @@ endif()
 enable_testing()
 
 {{- range .Modules }}
+{{- if eq $.Kind "modular" }}
+add_executable(test_{{.Name}} {{.Name}}/tests/test_{{.Name}}.c)
+{{- else }}
 add_executable(test_{{.Name}} tests/test_{{.Name}}.c)
+{{- end }}
 target_link_libraries(test_{{.Name}} PRIVATE {{$.CMakeName}}_core ${CMOCKA_TARGET})
 add_test(NAME test_{{.Name}} COMMAND test_{{.Name}})
 
@@ -613,12 +619,12 @@ const CMakePresetsTemplate = `{
 
 const MakefileTemplate = `CC := cc
 CMAKE := cmake
-CFLAGS := -std=c11 -Wall -Wextra -Wpedantic -Werror{{if eq .Kind "modular"}}{{range .Modules}} -I{{.Name}}{{end}}{{else}} -Iinclude{{end}}
+CFLAGS := -std=c11 -Wall -Wextra -Wpedantic -Werror{{if eq .Kind "modular"}}{{range .Modules}} -I{{.Name}}/include{{end}}{{else}} -Iinclude{{end}}
 LDFLAGS :=
 LDLIBS := -lcmocka
 
 BUILD_DIR := build
-CORE_SRC :={{if eq .Kind "modular"}}{{range .Modules}} {{.Name}}/{{.Name}}.c{{end}}{{else}}{{range .Modules}} src/{{.Name}}.c{{end}}{{end}}
+CORE_SRC :={{if eq .Kind "modular"}}{{range .Modules}} {{.Name}}/src/{{.Name}}.c{{end}}{{else}}{{range .Modules}} src/{{.Name}}.c{{end}}{{end}}
 {{- if ne .Kind "modular" }}
 APP_SRC := src/main.c
 APP := $(BUILD_DIR)/{{.Slug}}
@@ -638,8 +644,13 @@ $(APP): $(CORE_SRC) $(APP_SRC) | dirs
 {{- end }}
 
 {{- range .Modules }}
+{{- if eq $.Kind "modular" }}
+$(BUILD_DIR)/test_{{.Name}}: $(CORE_SRC) {{.Name}}/tests/test_{{.Name}}.c | dirs
+	$(CC) $(CFLAGS) $(CORE_SRC) {{.Name}}/tests/test_{{.Name}}.c -o $@ $(LDFLAGS) $(LDLIBS)
+{{- else }}
 $(BUILD_DIR)/test_{{.Name}}: $(CORE_SRC) tests/test_{{.Name}}.c | dirs
 	$(CC) $(CFLAGS) $(CORE_SRC) tests/test_{{.Name}}.c -o $@ $(LDFLAGS) $(LDLIBS)
+{{- end }}
 
 {{- end }}
 test: $(TESTS)
@@ -682,14 +693,45 @@ C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypas
 
 const StyleGuideTemplate = `# C Style Guide
 
-Types use PascalCase. Functions use PascalCase segments separated by underscores when needed:
+Types use PascalCase:
 
 ` + "```c" + `
-CacheSim *CacheSim_Create(CacheConfig config);
-void CacheSim_Destroy(CacheSim *cache_sim);
+typedef struct CacheSim CacheSim;
+typedef enum TraceOp TraceOp;
+` + "```" + `
+
+Functions use the same casing whether public or private. If a type name appears in the function name, keep it exactly as the type name with no added underscores. Use underscores only between other word segments:
+
+` + "```c" + `
+CacheSim* CacheSim_Create(CacheConfig config);
+void CacheSim_Destroy(CacheSim* cache_sim);
+` + "```" + `
+
+If the type name is intentionally lowercase, keep that lowercase type prefix:
+
+` + "```c" + `
+Error tcp_Connect(tcp_Connection* connection);
 ` + "```" + `
 
 Variables use lower snake case.
+
+Pointers bind to the type:
+
+` + "```c" + `
+CacheSim* cache_sim;
+` + "```" + `
+
+Macros and enum values use upper snake case:
+
+` + "```c" + `
+#define CACHE_LINE_SIZE 64
+
+typedef enum TraceOp
+{
+    TRACE_OP_READ = 0,
+    TRACE_OP_WRITE = 1
+} TraceOp;
+` + "```" + `
 
 Opening braces go on their own line:
 
@@ -698,6 +740,12 @@ int main(void)
 {
     return 0;
 }
+` + "```" + `
+
+Use early returns for error handling. Heap-owned objects use ` + "`Create`" + ` / ` + "`Destroy`" + `, caller-owned objects use ` + "`Init`" + ` / ` + "`Deinit`" + `, and fallible APIs should prefer:
+
+` + "```c" + `
+Error Function(...);
 ` + "```" + `
 `
 
