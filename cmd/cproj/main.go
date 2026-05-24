@@ -209,22 +209,29 @@ func WriteProject(root string, project Project) error {
 
 func ProjectFiles(project Project) map[string]string {
 	files := map[string]string{
-		".clang-format":            Render(ClangFormatTemplate, project),
-		".clang-tidy":              Render(ClangTidyTemplate, project),
-		".gitignore":               Render(GitignoreTemplate, project),
-		".pre-commit-config.yaml":  Render(PreCommitTemplate, project),
-		"CMakeLists.txt":           Render(CMakeTemplate, project),
-		"Makefile":                 Render(MakefileTemplate, project),
-		"README.md":                Render(ReadmeTemplate, project),
-		"docs/c-style-guide.md":    Render(StyleGuideTemplate, project),
-		"docs/local-dev.md":        Render(LocalDevTemplate, project),
-		"scripts/dev-env.ps1":      Render(DevEnvTemplate, project),
-		"scripts/local-ci.ps1":     Render(LocalCiTemplate, project),
-		"scripts/format.ps1":       Render(FormatScriptTemplate, project),
-		"scripts/analyze.ps1":      Render(AnalyzeScriptTemplate, project),
-		"scripts/coverage.ps1":     Render(CoverageScriptTemplate, project),
-		"scripts/compile-db.ps1":   Render(CompileDbScriptTemplate, project),
-		".github/workflows/ci.yml": Render(CiTemplate, project),
+		".editorconfig":                     Render(EditorConfigTemplate, project),
+		".clang-format":                     Render(ClangFormatTemplate, project),
+		".clang-tidy":                       Render(ClangTidyTemplate, project),
+		".gitignore":                        Render(GitignoreTemplate, project),
+		".pre-commit-config.yaml":           Render(PreCommitTemplate, project),
+		"CMakeLists.txt":                    Render(CMakeTemplate, project),
+		"CMakePresets.json":                 Render(CMakePresetsTemplate, project),
+		"CONTRIBUTING.md":                   Render(ContributingTemplate, project),
+		"LICENSE":                           Render(LicenseTemplate, project),
+		"Makefile":                          Render(MakefileTemplate, project),
+		"README.md":                         Render(ReadmeTemplate, project),
+		"docs/c-style-guide.md":             Render(StyleGuideTemplate, project),
+		"docs/design-notes.md":              Render(DesignNotesTemplate, project),
+		"docs/local-dev.md":                 Render(LocalDevTemplate, project),
+		"docs/roadmap.md":                   Render(RoadmapTemplate, project),
+		"scripts/dev-env.ps1":               Render(DevEnvTemplate, project),
+		"scripts/local-ci.ps1":              Render(LocalCiTemplate, project),
+		"scripts/format.ps1":                Render(FormatScriptTemplate, project),
+		"scripts/analyze.ps1":               Render(AnalyzeScriptTemplate, project),
+		"scripts/coverage.ps1":              Render(CoverageScriptTemplate, project),
+		"scripts/compile-db.ps1":            Render(CompileDbScriptTemplate, project),
+		"tests/test_support/test_support.h": Render(TestSupportHeaderTemplate, project),
+		".github/workflows/ci.yml":          Render(CiTemplate, project),
 	}
 
 	if project.Kind == "modular" {
@@ -245,7 +252,7 @@ func ProjectFiles(project Project) map[string]string {
 		files["experiments/.gitkeep"] = ""
 	}
 
-	files["benchmarks/.gitkeep"] = ""
+	files["benchmarks/README.md"] = Render(BenchmarksReadmeTemplate, project)
 	return files
 }
 
@@ -289,6 +296,23 @@ func ToHeaderGuard(text string) string {
 	text = re.ReplaceAllString(text, "_")
 	return strings.Trim(text, "_")
 }
+
+const EditorConfigTemplate = `root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[Makefile]
+indent_style = tab
+
+[*.{yml,yaml,json,md,ps1}]
+indent_size = 2
+`
 
 const ClangFormatTemplate = `BasedOnStyle: LLVM
 Language: Cpp
@@ -335,6 +359,7 @@ CheckOptions:
 
 const GitignoreTemplate = `build/
 build-coverage/
+build-sanitize/
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
@@ -348,6 +373,43 @@ coverage.info
 *.obj
 *.o
 *.out
+`
+
+const LicenseTemplate = `MIT License
+
+Copyright (c) 2026 Kevin Mettias
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+`
+
+const ContributingTemplate = `# Contributing
+
+This is a personal systems C project. Use this checklist before committing:
+
+- run the local CI script
+- format C sources with clang-format
+- keep public names aligned with docs/c-style-guide.md
+- add or update tests for behavior changes
+- record design decisions in docs/design-notes.md
+- keep experiments and benchmarks separate from production code
+
+Do not merge incomplete behavior behind passing placeholder tests. Prefer small, inspectable commits.
 `
 
 const PreCommitTemplate = `repos:
@@ -377,6 +439,8 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(ENABLE_COVERAGE "Build with gcov/lcov coverage instrumentation" OFF)
+option(ENABLE_ASAN "Build with AddressSanitizer instrumentation" OFF)
+option(ENABLE_UBSAN "Build with UndefinedBehaviorSanitizer instrumentation" OFF)
 
 find_package(cmocka CONFIG QUIET)
 if(cmocka_FOUND)
@@ -429,6 +493,24 @@ if(ENABLE_COVERAGE)
     endif()
 endif()
 
+if(ENABLE_ASAN)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options({{.CMakeName}}_core PUBLIC -fsanitize=address -fno-omit-frame-pointer -O1 -g)
+        target_link_options({{.CMakeName}}_core PUBLIC -fsanitize=address)
+    else()
+        message(FATAL_ERROR "ENABLE_ASAN requires GCC or Clang")
+    endif()
+endif()
+
+if(ENABLE_UBSAN)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options({{.CMakeName}}_core PUBLIC -fsanitize=undefined -fno-omit-frame-pointer -O1 -g)
+        target_link_options({{.CMakeName}}_core PUBLIC -fsanitize=undefined)
+    else()
+        message(FATAL_ERROR "ENABLE_UBSAN requires GCC or Clang")
+    endif()
+endif()
+
 enable_testing()
 
 {{- range .Modules }}
@@ -437,6 +519,96 @@ target_link_libraries(test_{{.Name}} PRIVATE {{$.CMakeName}}_core ${CMOCKA_TARGE
 add_test(NAME test_{{.Name}} COMMAND test_{{.Name}})
 
 {{- end }}
+`
+
+const CMakePresetsTemplate = `{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "coverage",
+      "displayName": "Coverage",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-coverage",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_COVERAGE": "ON"
+      }
+    },
+    {
+      "name": "sanitize-linux",
+      "displayName": "ASan + UBSan (Linux/WSL)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-sanitize",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_ASAN": "ON",
+        "ENABLE_UBSAN": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage"
+    },
+    {
+      "name": "sanitize-linux",
+      "configurePreset": "sanitize-linux"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "sanitize-linux",
+      "configurePreset": "sanitize-linux",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
 `
 
 const MakefileTemplate = `CC := cc
@@ -500,6 +672,12 @@ make test
 ` + "```powershell" + `
 C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File scripts\local-ci.ps1
 ` + "```" + `
+
+## Design Notes
+
+- docs/roadmap.md tracks milestones and scope.
+- docs/design-notes.md records decisions, invariants, and open questions.
+- benchmarks/ stores benchmark plans, inputs, and reports.
 `
 
 const StyleGuideTemplate = `# C Style Guide
@@ -523,6 +701,51 @@ int main(void)
 ` + "```" + `
 `
 
+const RoadmapTemplate = `# Roadmap
+
+## Milestones
+
+1. Define the public surface and project invariants.
+2. Add focused tests for the smallest useful behavior.
+3. Implement the first narrow feature.
+4. Add benchmarks only after correctness tests exist.
+5. Record design decisions as the implementation changes.
+
+## In Scope
+
+- core implementation
+- tests
+- benchmarks
+- design notes
+
+## Out Of Scope For Now
+
+- broad rewrites before the first working path
+- performance tuning before correctness
+- large abstractions without repeated concrete use
+`
+
+const DesignNotesTemplate = `# Design Notes
+
+Use this file to capture decisions while they are still fresh.
+
+## Invariants
+
+- TBD
+
+## Data Ownership
+
+- TBD
+
+## Error Handling
+
+- TBD
+
+## Open Questions
+
+- TBD
+`
+
 const LocalDevTemplate = `# Local Development
 
 Use MSYS2 UCRT64 on Windows.
@@ -531,6 +754,16 @@ Use MSYS2 UCRT64 on Windows.
 C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File scripts\dev-env.ps1
 C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File scripts\local-ci.ps1
 ` + "```" + `
+
+Useful CMake presets:
+
+` + "```powershell" + `
+C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File scripts\dev-env.ps1 cmake --preset debug
+C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File scripts\dev-env.ps1 cmake --build --preset debug
+C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File scripts\dev-env.ps1 ctest --preset debug
+` + "```" + `
+
+The ` + "`sanitize-linux`" + ` preset is intended for Linux, WSL, and CI. Native Windows/MSYS2 GCC builds may not provide ASan/UBSan runtime libraries.
 `
 
 const DevEnvTemplate = `param(
@@ -739,6 +972,15 @@ jobs:
 
       - name: Run Make tests
         run: make test
+
+      - name: Configure sanitizer build
+        run: cmake -S . -B build-sanitize -DENABLE_ASAN=ON -DENABLE_UBSAN=ON
+
+      - name: Build sanitizer target
+        run: cmake --build build-sanitize --parallel
+
+      - name: Run sanitizer tests
+        run: ctest --test-dir build-sanitize --output-on-failure
 `
 
 const ModuleHeaderTemplate = `#ifndef {{.HeaderName}}
@@ -773,6 +1015,37 @@ int main(void)
 
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
+`
+
+const TestSupportHeaderTemplate = `#ifndef TEST_SUPPORT_H
+#define TEST_SUPPORT_H
+
+#include <stdint.h>
+
+static inline uint64_t TestSupport_Kib(uint64_t value)
+{
+    return value * 1024;
+}
+
+static inline uint64_t TestSupport_Mib(uint64_t value)
+{
+    return TestSupport_Kib(value) * 1024;
+}
+
+#endif
+`
+
+const BenchmarksReadmeTemplate = `# Benchmarks
+
+Keep benchmark inputs, commands, and results here.
+
+Suggested layout:
+
+- inputs/
+- results/
+- reports/
+
+Start with correctness tests. Add benchmarks once the first useful behavior exists.
 `
 
 const MainTemplate = `#include <stdio.h>

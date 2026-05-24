@@ -45,12 +45,18 @@ Generated repos include:
 
 - C11
 - CMake
+- CMake presets for debug, release, coverage, and sanitizer builds
 - Makefile
 - CMocka tests
 - clang-format
 - clang-tidy
 - cppcheck
 - coverage script
+- AddressSanitizer and UndefinedBehaviorSanitizer options
+- `.editorconfig`
+- `LICENSE`
+- `CONTRIBUTING.md`
+- roadmap and design note docs
+- test support and benchmark directories
 - local Windows/MSYS2 helper scripts
 - GitHub Actions CI
-
