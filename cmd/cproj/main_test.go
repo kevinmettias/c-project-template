@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -143,6 +144,7 @@ func TestProjectFilesBasic(t *testing.T) {
 		"include/allocator-lab.h",
 		"src/allocator-lab.c",
 		"src/main.c",
+		"tests/test_main.c",
 		"tests/test_allocator-lab.c",
 		"tests/test_support/test_support.h",
 		"docs/roadmap.md",
@@ -154,6 +156,14 @@ func TestProjectFilesBasic(t *testing.T) {
 		if _, ok := files[path]; !ok {
 			t.Fatalf("ProjectFiles missing %q", path)
 		}
+	}
+
+	if !strings.Contains(files["CMakeLists.txt"], "add_executable(test_runner") {
+		t.Fatal("CMakeLists.txt missing test_runner target for basic projects")
+	}
+
+	if !strings.Contains(files["CMakePresets.json"], "debug-vcpkg") {
+		t.Fatal("CMakePresets.json missing debug-vcpkg preset")
 	}
 }
 
