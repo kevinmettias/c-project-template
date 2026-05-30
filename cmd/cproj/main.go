@@ -245,7 +245,8 @@ func ProjectFiles(project Project) map[string]string {
 		files["include/"+module.Name+".h"] = Render(ModuleHeaderTemplate, module)
 		files["src/"+module.Name+".c"] = Render(ModuleSourceTemplate, module)
 		files["src/main.c"] = Render(MainTemplate, project)
-		files["tests/test_"+module.Name+".c"] = Render(ModuleTestTemplate, module)
+		files["tests/test_main.c"] = Render(TestMainTemplate, module)
+		files["tests/test_"+module.Name+".c"] = Render(BasicModuleTestTemplate, module)
 	}
 
 	if project.Kind == "lab" {
@@ -478,12 +479,29 @@ target_include_directories({{.CMakeName}}_core PUBLIC include)
 
 add_executable({{.Slug}} src/main.c)
 target_link_libraries({{.Slug}} PRIVATE {{.CMakeName}}_core)
+
+add_executable(test_runner
+    tests/test_main.c
+{{- range .Modules }}
+    tests/test_{{.Name}}.c
+{{- end }}
+)
+target_link_libraries(test_runner PRIVATE {{.CMakeName}}_core ${CMOCKA_TARGET})
+add_test(NAME test_runner COMMAND test_runner)
 {{- end }}
 
 if(MSVC)
     target_compile_options({{.CMakeName}}_core PRIVATE /W4 /WX)
+{{- if ne .Kind "modular" }}
+    target_compile_options({{.Slug}} PRIVATE /W4)
+    target_compile_options(test_runner PRIVATE /W4)
+{{- end }}
 else()
     target_compile_options({{.CMakeName}}_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
+{{- if ne .Kind "modular" }}
+    target_compile_options({{.Slug}} PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(test_runner PRIVATE -Wall -Wextra -Wpedantic)
+{{- end }}
 endif()
 
 if(ENABLE_COVERAGE)
@@ -515,15 +533,13 @@ endif()
 
 enable_testing()
 
+{{- if eq .Kind "modular" }}
 {{- range .Modules }}
-{{- if eq $.Kind "modular" }}
 add_executable(test_{{.Name}} {{.Name}}/tests/test_{{.Name}}.c)
-{{- else }}
-add_executable(test_{{.Name}} tests/test_{{.Name}}.c)
-{{- end }}
 target_link_libraries(test_{{.Name}} PRIVATE {{$.CMakeName}}_core ${CMOCKA_TARGET})
 add_test(NAME test_{{.Name}} COMMAND test_{{.Name}})
 
+{{- end }}
 {{- end }}
 `
 
@@ -539,16 +555,33 @@ const CMakePresetsTemplate = `{
       "name": "debug",
       "displayName": "Debug",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build",
+      "binaryDir": "${sourceDir}/cmake-build-debug",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "debug-vcpkg",
+      "displayName": "Debug + vcpkg",
+      "description": "Debug build for CLion on Windows using vcpkg-provided cmocka.",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/cmake-build-debug-vcpkg",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
       }
     },
     {
       "name": "release",
       "displayName": "Release",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build-release",
+      "binaryDir": "${sourceDir}/cmake-build-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
@@ -557,7 +590,7 @@ const CMakePresetsTemplate = `{
       "name": "coverage",
       "displayName": "Coverage",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build-coverage",
+      "binaryDir": "${sourceDir}/cmake-build-coverage",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "ENABLE_COVERAGE": "ON"
@@ -567,7 +600,7 @@ const CMakePresetsTemplate = `{
       "name": "sanitize-linux",
       "displayName": "ASan + UBSan (Linux/WSL)",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build-sanitize",
+      "binaryDir": "${sourceDir}/cmake-build-sanitize",
       "condition": {
         "type": "notEquals",
         "lhs": "${hostSystemName}",
@@ -590,6 +623,10 @@ const CMakePresetsTemplate = `{
       "configurePreset": "release"
     },
     {
+      "name": "debug-vcpkg",
+      "configurePreset": "debug-vcpkg"
+    },
+    {
       "name": "coverage",
       "configurePreset": "coverage"
     },
@@ -602,6 +639,13 @@ const CMakePresetsTemplate = `{
     {
       "name": "debug",
       "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug-vcpkg",
+      "configurePreset": "debug-vcpkg",
       "output": {
         "outputOnFailure": true
       }
@@ -628,8 +672,9 @@ CORE_SRC :={{if eq .Kind "modular"}}{{range .Modules}} {{.Name}}/src/{{.Name}}.c
 {{- if ne .Kind "modular" }}
 APP_SRC := src/main.c
 APP := $(BUILD_DIR)/{{.Slug}}
+TEST_RUNNER := $(BUILD_DIR)/test_runner
 {{- end }}
-TESTS :={{range .Modules}} $(BUILD_DIR)/test_{{.Name}}{{end}}
+TESTS :={{if eq .Kind "modular"}}{{range .Modules}} $(BUILD_DIR)/test_{{.Name}}{{end}}{{else}} $(TEST_RUNNER){{end}}
 
 .PHONY: all test clean dirs
 
@@ -648,14 +693,18 @@ $(APP): $(CORE_SRC) $(APP_SRC) | dirs
 $(BUILD_DIR)/test_{{.Name}}: $(CORE_SRC) {{.Name}}/tests/test_{{.Name}}.c | dirs
 	$(CC) $(CFLAGS) $(CORE_SRC) {{.Name}}/tests/test_{{.Name}}.c -o $@ $(LDFLAGS) $(LDLIBS)
 {{- else }}
-$(BUILD_DIR)/test_{{.Name}}: $(CORE_SRC) tests/test_{{.Name}}.c | dirs
-	$(CC) $(CFLAGS) $(CORE_SRC) tests/test_{{.Name}}.c -o $@ $(LDFLAGS) $(LDLIBS)
+$(TEST_RUNNER): $(CORE_SRC) tests/test_main.c tests/test_{{.Name}}.c | dirs
+  $(CC) $(CFLAGS) $(CORE_SRC) tests/test_main.c tests/test_{{.Name}}.c -o $@ $(LDFLAGS) $(LDLIBS)
 {{- end }}
 
 {{- end }}
 test: $(TESTS)
+{{- if eq .Kind "modular" }}
 {{- range .Modules }}
-	$(BUILD_DIR)/test_{{.Name}}
+  $(BUILD_DIR)/test_{{.Name}}
+{{- end }}
+{{- else }}
+  $(TEST_RUNNER)
 {{- end }}
 
 clean:
@@ -669,13 +718,37 @@ C project generated by ` + "`cproj`" + `.
 ## Build
 
 ` + "```sh" + `
-make
+cmake --preset debug
+cmake --build --preset debug
 ` + "```" + `
 
 ## Test
 
 ` + "```sh" + `
+ctest --preset debug --output-on-failure
+` + "```" + `
+
+Fallback Makefile workflow:
+
+` + "```sh" + `
+make
 make test
+` + "```" + `
+
+## Debug Tests In CLion
+
+Basic and lab projects generate a dedicated ` + "`test_runner`" + ` target so CLion can debug tests directly. Open the project as a CMake project, pick the ` + "`debug`" + ` preset, build ` + "`test_runner`" + `, and debug that target with breakpoints in ` + "`tests/test_main.c`" + `.
+
+## Windows + vcpkg
+
+On Windows, install ` + "`cmocka`" + ` through vcpkg and use the ` + "`debug-vcpkg`" + ` preset:
+
+` + "```powershell" + `
+$env:VCPKG_ROOT = "C:\dev\vcpkg"
+vcpkg install cmocka:x64-windows
+cmake --preset debug-vcpkg
+cmake --build --preset debug-vcpkg --target test_runner
+ctest --preset debug-vcpkg
 ` + "```" + `
 
 ## Local CI
@@ -810,6 +883,16 @@ C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypas
 C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File scripts\dev-env.ps1 cmake --build --preset debug
 C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File scripts\dev-env.ps1 ctest --preset debug
 ` + "```" + `
+
+CLion + vcpkg on Windows:
+
+` + "```powershell" + `
+$env:VCPKG_ROOT = "C:\dev\vcpkg"
+C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File scripts\dev-env.ps1 cmake --preset debug-vcpkg
+C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File scripts\dev-env.ps1 cmake --build --preset debug-vcpkg --target test_runner
+` + "```" + `
+
+In CLion, open **Settings → Build, Execution, Deployment → CMake**, choose the ` + "`debug-vcpkg`" + ` preset, reload CMake, and debug ` + "`test_runner`" + ` directly so breakpoints work in ` + "`tests/test_main.c`" + `.
 
 The ` + "`sanitize-linux`" + ` preset is intended for Linux, WSL, and CI. Native Windows/MSYS2 GCC builds may not provide ASan/UBSan runtime libraries.
 `
@@ -1054,6 +1137,34 @@ static void {{.TypeName}}_Placeholder_Test(void **state)
 {
     (void)state;
 }
+
+int main(void)
+{
+    const struct CMUnitTest tests[] = {
+        cmocka_unit_test({{.TypeName}}_Placeholder_Test),
+    };
+
+    return cmocka_run_group_tests(tests, NULL, NULL);
+}
+`
+
+const BasicModuleTestTemplate = `#include <stdarg.h>
+#include <stddef.h>
+#include <setjmp.h>
+#include <cmocka.h>
+
+void {{.TypeName}}_Placeholder_Test(void **state)
+{
+    (void)state;
+}
+`
+
+const TestMainTemplate = `#include <stdarg.h>
+#include <stddef.h>
+#include <setjmp.h>
+#include <cmocka.h>
+
+void {{.TypeName}}_Placeholder_Test(void **state);
 
 int main(void)
 {
